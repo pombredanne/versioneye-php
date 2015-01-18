@@ -2,11 +2,13 @@
 
 namespace Rs\VersionEye;
 
-use Rs\VersionEye\Http\BuzzClient;
-use Rs\VersionEye\Http\GuzzleClient;
+use Ivory\HttpAdapter\Event\Subscriber\RedirectSubscriber;
+use Ivory\HttpAdapter\Event\Subscriber\RetrySubscriber;
+use Ivory\HttpAdapter\Event\Subscriber\StatusCodeSubscriber;
+use Ivory\HttpAdapter\HttpAdapterFactory;
 use Rs\VersionEye\Http\HttpClient;
 use Rs\VersionEye\Api\Api;
-use Rs\VersionEye\Http\ZendClient;
+use Rs\VersionEye\Http\IvoryHttpAdapterClient;
 
 /**
  * Client for interacting with the API
@@ -40,12 +42,12 @@ class Client
      */
     public function api($name)
     {
-        $class = 'Rs\\VersionEye\\Api\\' . ucfirst($name);
+        $class = 'Rs\\VersionEye\\Api\\'.ucfirst($name);
 
         if (class_exists($class)) {
             return new $class($this->client, $this->token);
         } else {
-            throw new \InvalidArgumentException('unknown api "' . $name . '" requested');
+            throw new \InvalidArgumentException('unknown api "'.$name.'" requested');
         }
     }
 
@@ -62,21 +64,34 @@ class Client
     /**
      * initializes the http client
      *
-     * @param string     $url
-     * @param HttpClient $client
+     * @param  string     $url
+     * @param  HttpClient $client
+     * @return HttpClient
      */
     private function initializeClient($url, HttpClient $client = null)
     {
         if ($client) {
-            $this->client = $client;
-        } elseif (!$client && class_exists('\GuzzleHttp\Client')) {
-            $this->client = new GuzzleClient($url);
-        } elseif (!$client && class_exists('Buzz\Browser')) {
-            $this->client = new BuzzClient($url);
-        } elseif (!$client && class_exists('Zend\Http\Client')) {
-            $this->client = new ZendClient($url);
-        } else {
-            throw new \RuntimeException('no suitable HTTP adapter found');
+            return $this->client = $client;
         }
+
+        return $this->client = $this->createDefaultHttpClient($url);
+    }
+
+    /**
+     * @param  string                                  $url
+     * @return IvoryHttpAdapterClient
+     * @throws \Ivory\HttpAdapter\HttpAdapterException
+     */
+    private function createDefaultHttpClient($url)
+    {
+        $adapter = HttpAdapterFactory::guess();
+
+        if ($adapter->getConfiguration()->getEventDispatcher()) {
+            $adapter->getConfiguration()->getEventDispatcher()->addSubscriber(new RedirectSubscriber());
+            $adapter->getConfiguration()->getEventDispatcher()->addSubscriber(new RetrySubscriber());
+            $adapter->getConfiguration()->getEventDispatcher()->addSubscriber(new StatusCodeSubscriber());
+        }
+
+        return new IvoryHttpAdapterClient($adapter, $url);
     }
 }
